@@ -13,9 +13,9 @@
 namespace mealkit::live {
 namespace {
 
-constexpr size_t kMaxRequest = 64u << 20; // 받는 요청 크기 상한 (Penpot 가져오기의 구운 PNG·원본 포함)
-constexpr size_t kMaxStreamBacklog = 4u << 20; // 스트림을 못 읽어 가는 연결은 이만큼 쌓이면 닫는다
-constexpr u32 kIdleFrames = 1800;         // 이만큼 프레임 동안 조용한 요청 연결은 닫는다 (스트림은 빼고)
+constexpr size_t kMaxRequest = 64u << 20; // max request size received (including baked PNGs and sources from Penpot import)
+constexpr size_t kMaxStreamBacklog = 4u << 20; // connections not reading their stream are closed when this much piles up
+constexpr u32 kIdleFrames = 1800;         // request connections quiet for this many frames are closed (except streams)
 
 std::string lower(std::string s) {
     for (char& c : s)
@@ -98,7 +98,7 @@ bool Server::start(const ServerConfig& config) {
     if (!net::startup()) return false;
     m_token = config.token;
     if (m_token.empty()) {
-        std::random_device rd; // 실행마다 다른 값 (시뮬레이션과 무관)
+        std::random_device rd; // different value per run (unrelated to the simulation)
         char buf[33];
         std::snprintf(buf, sizeof(buf), "%08x%08x%08x%08x", rd(), rd(), rd(), rd());
         m_token = buf;
@@ -133,7 +133,7 @@ void Server::writeInfo() {
     if (m_config.projectDir.empty()) return;
     const std::string dir = m_config.projectDir + "/" + kInfoFolder;
     if (!createDirectories(dir)) return;
-    // 비정상 종료로 남은 파일 정리: 이름의 pid가 더는 없으면 지운다
+    // Clean up files left by abnormal exits: delete if the pid in the name no longer exists
     for (const std::string& f : listFiles(dir, ".json")) {
         const size_t dash = f.rfind('-');
         const u32 pid = dash == std::string::npos ? 0 : static_cast<u32>(std::strtoul(f.c_str() + dash + 1, nullptr, 10));
@@ -175,7 +175,7 @@ void Server::publish(const char* topic, const std::string& json) {
     for (Connection& c : m_connections) {
         if (!c.streaming || std::find(c.topics.begin(), c.topics.end(), topic) == c.topics.end()) continue;
         if (c.out.size() - c.sent > kMaxStreamBacklog) {
-            c.stream.close(); // 읽어 가지 않는 도구
+            c.stream.close(); // a tool that isn't reading
             continue;
         }
         c.out += std::string("event: ") + topic + "\ndata: " + json + "\n\n";
@@ -183,7 +183,7 @@ void Server::publish(const char* topic, const std::string& json) {
 }
 
 bool Server::originAllowed(const std::string& origin, const Service* service) const {
-    if (origin.empty()) return true; // 도구(브라우저가 아닌 프로그램)·주소창은 Origin이 없다 (토큰이 지킨다)
+    if (origin.empty()) return true; // tools (non-browser programs) and the address bar have no Origin (the token guards)
     if (lower(origin) == this->origin()) return true;
     return service && service->allowOrigin && service->allowOrigin(lower(origin));
 }
@@ -195,13 +195,13 @@ Response Server::handle(const std::string& method, const std::string& fullPath, 
     const std::string prefix = "/" + m_token + "/";
     if (m_token.empty() || !startsWith(path, prefix)) return error(404, "not found");
     path = path.substr(prefix.size());
-    // 서비스: /<토큰>/<이름>/...
+    // Services: /<token>/<name>/...
     const Service* service = nullptr;
     for (const Service& s : m_services)
         if (path == s.name || startsWith(path, s.name + "/")) service = &s;
     if (!originAllowed(origin, service)) return error(403, "origin not allowed");
     if (allowOrigin && !origin.empty()) *allowOrigin = origin;
-    if (method == "OPTIONS") { // CORS 미리 묻기
+    if (method == "OPTIONS") { // CORS preflight
         Response r;
         r.status = 204;
         return r;
@@ -288,7 +288,7 @@ void Server::update() {
                     const std::string body = c.in.substr(headerEnd + 4, contentLength);
                     c.in.clear();
                     c.responded = true;
-                    // 상태 스트림: 머리만 보내고 연결을 열어 둔다
+                    // Status stream: send only the headers and keep the connection open
                     const std::string clean = path.substr(0, path.find('?'));
                     if (method == "GET" && clean == "/" + m_token + "/api/events" && originAllowed(origin, nullptr)) {
                         c.streaming = true;
@@ -305,7 +305,7 @@ void Server::update() {
                         if (!allow.empty()) {
                             head += "Access-Control-Allow-Origin: " + allow + "\r\nVary: Origin\r\n";
                             head += "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n";
-                            if (privateNetwork) head += "Access-Control-Allow-Private-Network: true\r\n"; // Chrome 사설망 접근
+                            if (privateNetwork) head += "Access-Control-Allow-Private-Network: true\r\n"; // Chrome private network access
                         }
                         c.out = head + "\r\n" + r.body;
                     }
@@ -329,7 +329,7 @@ void Server::update() {
                 c.out.clear();
                 c.sent = 0;
             }
-            if (c.streaming && c.stream.isOpen()) { // 도구가 끊었나 (읽을 것은 없다)
+            if (c.streaming && c.stream.isOpen()) { // did the tool disconnect (there's nothing to read)
                 const i32 got = c.stream.receive(buffer, sizeof(buffer));
                 if (got < 0) c.stream.close();
             }
