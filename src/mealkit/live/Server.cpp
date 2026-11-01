@@ -5,6 +5,8 @@
 #include "mealkit/platform/Paths.h"
 #include "mealkit/platform/System.h"
 
+#include <mkcontract/Json.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -64,31 +66,8 @@ std::vector<std::string> topicsOf(const std::string& query) {
 
 } // namespace
 
-std::string jsonString(const std::string& s) {
-    std::string out = "\"";
-    for (const char c : s) {
-        switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if (static_cast<u8>(c) < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
-                out += buf;
-            } else out += c;
-        }
-    }
-    return out + "\"";
-}
-
-std::string jsonList(const std::vector<std::string>& items) {
-    std::string out = "[";
-    for (size_t i = 0; i < items.size(); ++i) out += (i ? "," : "") + jsonString(items[i]);
-    return out + "]";
-}
+std::string jsonString(const std::string& s) { return mkcontract::jsonString(s); }
+std::string jsonList(const std::vector<std::string>& items) { return mkcontract::jsonList(items); }
 
 Server::~Server() { stop(); }
 
@@ -135,17 +114,20 @@ void Server::writeInfo() {
     if (!createDirectories(dir)) return;
     // Clean up files left by abnormal exits: delete if the pid in the name no longer exists
     for (const std::string& f : listFiles(dir, ".json")) {
-        const size_t dash = f.rfind('-');
-        const u32 pid = dash == std::string::npos ? 0 : static_cast<u32>(std::strtoul(f.c_str() + dash + 1, nullptr, 10));
+        const u32 pid = mkcontract::live::infoFilePid(f);
         if (pid && pid != processId() && !processRunning(pid)) removeFile(dir + "/" + f);
     }
-    const u32 pid = processId();
-    m_infoPath = dir + "/" + m_config.kind + "-" + std::to_string(pid) + ".json";
-    const std::string json = "{\"protocol\":" + std::to_string(kProtocol) + ",\"kind\":" + jsonString(m_config.kind) +
-                             ",\"pid\":" + std::to_string(pid) + ",\"port\":" + std::to_string(port()) + ",\"token\":" + jsonString(m_token) +
-                             ",\"project\":" + jsonString(m_config.projectName) + ",\"engine\":" + jsonString(kEngineVersion) +
-                             ",\"url\":" + jsonString(baseUrl()) + "}\n";
-    if (!writeTextFile(m_infoPath, json)) {
+    mkcontract::live::Instance info;
+    info.protocol = kProtocol;
+    info.kind = m_config.kind;
+    info.pid = processId();
+    info.port = port();
+    info.token = m_token;
+    info.project = m_config.projectName;
+    info.engine = kEngineVersion;
+    info.url = baseUrl();
+    m_infoPath = dir + "/" + mkcontract::live::infoFileName(info.kind, info.pid);
+    if (!writeTextFile(m_infoPath, mkcontract::live::infoJson(info))) {
         MEALKIT_WARN("Live server: cannot write %s", m_infoPath.c_str());
         m_infoPath.clear();
     }

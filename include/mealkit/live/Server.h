@@ -3,6 +3,8 @@
 #include "mealkit/core/Types.h"
 #include "mealkit/net/Socket.h"
 
+#include <mkcontract/Live.h>
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -18,9 +20,9 @@
 // Requests are handled in update() on the main thread: services modify engine state without locks. Shipping builds (MEALKIT_LIVE=0) don't open it.
 namespace mealkit::live {
 
-inline constexpr u32 kProtocol = 1;       // contract version (protocol in tool manifests). Bump when paths/response shapes change
+inline constexpr u32 kProtocol = mkcontract::live::kProtocol; // contract version (protocol in tool manifests), owned by MealKit-Contract
 inline constexpr u16 kEditorPort = 27220; // editor: 10 ports from this one (so the Penpot plugin address uses the same port each run), games any port
-inline constexpr const char* kInfoFolder = "build/live";
+inline constexpr const char* kInfoFolder = mkcontract::live::kInfoFolder; // "build/live"
 
 struct Request {
     std::string method;
@@ -100,7 +102,7 @@ private:
     std::vector<std::string> m_topics; // topics from addTopic/publish (hello)
 };
 
-// Small JSON helpers (building responses)
+// Small JSON helpers (building responses; mkcontract's, as engine functions so mealkit.dll exports them)
 std::string jsonString(const std::string& s);
 std::string jsonList(const std::vector<std::string>& items);
 
