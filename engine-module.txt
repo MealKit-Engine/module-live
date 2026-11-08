@@ -5,6 +5,6 @@ name live
 version 0.1.0
 kernel 0.9
 kind tool
-requires net 0.1
+requires
 tag live
 summary Dev live connection server (dev builds and the editor only)
