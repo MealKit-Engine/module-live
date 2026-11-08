@@ -2,9 +2,10 @@
 # requires: modules this folder may include besides the kernel (core, platform, jobs), as name minVersion.
 @format engine-module 1
 name live
-version 0.1.0
+version 0.1.1
 kernel 0.9
 kind tool
+layer framework
 requires
 tag live
 summary Dev live connection server (dev builds and the editor only)
